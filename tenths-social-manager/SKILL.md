@@ -334,11 +334,24 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (emoji === '✅') {
     if (post.status === 'quick-draft') {
       try {
-        const tweetId = await postToX(post);
-        Object.assign(post, { platform_post_ids: { x: tweetId }, status: 'posted', posted_at: new Date().toISOString() });
+        const { results, errors, allFailed } = await publishToAllPlatforms(post);
+        post.platform_post_ids = results;
+        post.status = allFailed ? 'failed' : 'posted';
+        post.posted_at = allFailed ? undefined : new Date().toISOString();
+        if (allFailed) post.failed_at = new Date().toISOString();
         saveQueue(queue);
-        await ch.send({ embeds: [new EmbedBuilder().setTitle(`🏁 Posted: ${post.id}`).setColor(0x2ecc71)
-          .setDescription(`Live on 𝕏: https://x.com/TenthsRacing/status/${tweetId}`).setTimestamp()] });
+        const links = [];
+        if (results.x && !results.x.error) links.push(`𝕏: https://x.com/TenthsRacing/status/${results.x}`);
+        if (results.fb && !results.fb.error) links.push('📘 FB: posted');
+        const embed = new EmbedBuilder().setTimestamp();
+        if (allFailed) {
+          embed.setTitle(`❌ Post Failed: ${post.id}`).setColor(0xe74c3c)
+            .setDescription(errors.join('\n'));
+        } else {
+          embed.setTitle(`🏁 Posted: ${post.id}`).setColor(0x2ecc71)
+            .setDescription(links.join('\n') + (errors.length ? `\n⚠️ Partial: ${errors.join(', ')}` : ''));
+        }
+        await ch.send({ embeds: [embed] });
       } catch (err) {
         post.platform_post_ids = { x: { error: err.message } }; saveQueue(queue);
         await ch.send(`❌ Post failed: \`${err.message.slice(0, 200)}\``);
@@ -361,7 +374,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 ```javascript
 const { TwitterApi } = require('twitter-api-v2');
-// OAuth 1.0a required for posting (Bearer is read-only)
+const { postToFacebook } = require('./publisher-fb');
+
 const xClient = new TwitterApi({
   appKey: process.env.X_API_KEY, appSecret: process.env.X_API_SECRET,
   accessToken: process.env.X_ACCESS_TOKEN, accessSecret: process.env.X_ACCESS_SECRET });
@@ -369,6 +383,25 @@ const xClient = new TwitterApi({
 async function postToX(post) {
   const { data } = await xClient.v2.tweet(post.content.x.text);
   return data.id;
+}
+
+async function publishToAllPlatforms(post) {
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const results = {};
+  const errors = [];
+
+  if (config.platforms.x && config.platforms.x.enabled) {
+    try { results.x = await postToX(post); }
+    catch (err) { results.x = { error: err.message }; errors.push(`X: ${err.message}`); }
+  }
+
+  if (config.platforms.fb && config.platforms.fb.enabled && post.content.fb) {
+    try { results.fb = await postToFacebook(post); }
+    catch (err) { results.fb = { error: err.message }; errors.push(`FB: ${err.message}`); }
+  }
+
+  return { results, errors,
+    allFailed: errors.length > 0 && Object.keys(results).every(k => results[k] && results[k].error) };
 }
 ```
 
@@ -381,19 +414,16 @@ async function checkAndPublish() {
   const due = queue.posts.filter(p => p.status === 'approved' && p.scheduled_at && new Date(p.scheduled_at) <= now);
   let changed = false;
   for (const post of due) {
-    try {
-      const tweetId = await postToX(post);
-      post.platform_post_ids = { x: tweetId };
-      post.status = 'posted';
-      post.posted_at = now.toISOString();
-      changed = true;
-    } catch (err) {
-      post.platform_post_ids = { x: { error: err.message } };
-      post.status = 'failed';
-      post.failed_at = now.toISOString();
-      changed = true;
-      console.error(`[tenths-social] Post ${post.id} failed:`, err.message);
+    const { results, errors, allFailed } = await publishToAllPlatforms(post);
+    post.platform_post_ids = results;
+    if (allFailed) {
+      post.status = 'failed'; post.failed_at = now.toISOString();
+      console.error(`[tenths-social] Post ${post.id} failed:`, errors.join('; '));
+    } else {
+      post.status = 'posted'; post.posted_at = now.toISOString();
+      if (errors.length) console.warn(`[tenths-social] Post ${post.id} partial:`, errors.join('; '));
     }
+    changed = true;
   }
   if (changed) saveQueue(queue);
 }
@@ -421,8 +451,11 @@ async function handleHistory(message, count) {
     .sort((a,b) => new Date(b.posted_at) - new Date(a.posted_at)).slice(0, count);
   if (!posted.length) return message.reply('No posts yet.');
   await message.channel.send({ embeds: [new EmbedBuilder().setTitle('🏁 Recent Posts').setColor(0xFF8A00)
-    .setDescription(posted.map((p,i) => { const ok = p.platform_post_ids?.x && !p.platform_post_ids.x.error;
-      return `**${i+1}.** ${new Date(p.posted_at).toLocaleDateString()} — ${p.theme.replace(/_/g,' ')} ${ok?'𝕏 ✓':'𝕏 ✗'}`; }).join('\n'))] });
+    .setDescription(posted.map((p,i) => {
+      const xOk = p.platform_post_ids?.x && !p.platform_post_ids.x.error;
+      const fbOk = p.platform_post_ids?.fb && !p.platform_post_ids.fb.error;
+      return `**${i+1}.** ${new Date(p.posted_at).toLocaleDateString()} — ${p.theme.replace(/_/g,' ')} ${xOk?'𝕏 ✓':'𝕏 ✗'} ${fbOk?'📘 ✓':'📘 ✗'}`;
+    }).join('\n'))] });
 }
 ```
 
