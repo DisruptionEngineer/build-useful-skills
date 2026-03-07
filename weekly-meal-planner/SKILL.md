@@ -331,6 +331,43 @@ function isIndividualRecipeURL(candidate) {
 }
 ```
 
+### Collection Crawling
+
+When a search result is a collection/roundup page, the agent extracts individual recipe URLs from it instead of discarding it.
+
+```javascript
+const MAX_RECIPES_PER_COLLECTION = 5;
+
+async function extractRecipesFromCollection(collectionUrl, maxRecipes = MAX_RECIPES_PER_COLLECTION) {
+  // Agent: fetch the collection page HTML, then:
+  // 1. Find all <a> tags with href pointing to recipe-slug paths
+  //    - Prefer links on the SAME DOMAIN as collectionUrl
+  //    - Prefer links inside <article>, <li>, or elements with class/id containing "recipe"
+  //    - Skip navigation, footer, sidebar links
+  //    - Skip links matching COLLECTION_URL_PATTERNS (nested collections)
+  // 2. For each extracted link (up to maxRecipes):
+  //    a. Build a candidate object: { source_url, title: link text }
+  //    b. Validate with isIndividualRecipeURL(candidate)
+  //    c. If valid, fetch the individual recipe page and populate full candidate fields:
+  //       { id: uuid(), title, description, total_time_min, tags, source_url, cuisine, difficulty, servings }
+  // 3. Return array of fully populated, validated candidates
+
+  // Extraction priority for links on the page:
+  // - First: links inside elements with class/id matching /recipe/i
+  // - Second: links inside <article> or <li> elements
+  // - Last: any remaining links with recipe-slug-shaped paths (e.g., /chicken-tikka-masala/)
+  // Always skip: links to categories, tags, about pages, navigation, social media
+}
+```
+
+**Collection crawling rules for the agent:**
+1. Only crawl a page as a collection if `isIndividualRecipeURL()` returns false for it
+2. Cap extraction at 5 individual recipes per collection page
+3. Every extracted recipe URL MUST pass `isIndividualRecipeURL()` before becoming a candidate
+4. Prefer same-domain links — a collection on budgetbytes.com should yield budgetbytes.com recipe links
+5. Each extracted recipe must be fetched individually to confirm it has structured recipe data (title, cook time, ingredients)
+6. If a collection page yields zero valid individual recipes after crawling, discard it and move on
+
 **Search rules for the agent:**
 1. Always search for **individual recipe pages** — URLs like `budgetbytes.com/slow-cooker-chicken-tikka-masala/` not `allrecipes.com/gallery/best-dinners/`
 2. Every candidate URL MUST have a single recipe with: a title, cook time, ingredients list, and instructions
