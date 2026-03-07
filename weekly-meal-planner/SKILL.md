@@ -274,10 +274,12 @@ async function searchRecipes(planId, prefs, count) {
   for (const style of [...new Set(styles)]) {
     const query = styleQueries[style] || styleQueries.normal;
     // Agent: perform web search with this query. For each result:
-    // 1. Check the URL passes isIndividualRecipeURL() below
-    // 2. Fetch the page and confirm it has a single recipe (title, cook time, ingredients)
-    // 3. Build the candidate object from the page's structured data
-    // Continue searching until enough valid candidates are found
+    // 1. Check the URL with isIndividualRecipeURL()
+    // 2. IF INDIVIDUAL: fetch the page, confirm single recipe, build candidate object
+    // 3. IF COLLECTION: call extractRecipesFromCollection(result.url, 5)
+    //    — add each extracted individual recipe to candidates
+    // 4. Continue searching until enough valid candidates are found
+    // This ensures collection pages are MINED for recipes, not discarded
   }
 
   // Apply preference filters
