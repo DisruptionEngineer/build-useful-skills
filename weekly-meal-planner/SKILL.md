@@ -80,8 +80,17 @@ const PLANS_PATH = `${process.env.HOME}/.agents/data/meal-plans.json`;
 const CONFIG_PATH = `${process.env.HOME}/.agents/data/meal-planner-config.json`;
 const PREFS_PATH = `${process.env.HOME}/.agents/data/recipe-preferences.json`;
 const SHOP_PATH = `${process.env.HOME}/.agents/data/shopping-preferences.json`;
-function loadJSON(p) { return JSON.parse(require('fs').readFileSync(p, 'utf8')); }
-function saveJSON(p, d) { const t=p+'.tmp'; require('fs').writeFileSync(t,JSON.stringify(d,null,2)); require('fs').renameSync(t,p); }
+function loadJSON(p) {
+  try { return JSON.parse(require('fs').readFileSync(p, 'utf8')); }
+  catch { return null; }
+}
+function saveJSON(p, d) {
+  const fs = require('fs'), path = require('path');
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const t = p + '.tmp';
+  fs.writeFileSync(t, JSON.stringify(d, null, 2));
+  fs.renameSync(t, p);
+}
 
 async function fetchWeekEvents(weekStart, weekEnd, config) {
   const token = process.env[config.homeAssistant.tokenEnvVar], ha = config.homeAssistant.url;
