@@ -5,7 +5,7 @@ const path = require('path');
 const SCREENSHOT_DIR = path.join(process.env.HOME, '.agents', 'data', 'tenths-screenshots');
 const BASE_URL = 'https://tenths.racing';
 
-// Actual crew-chief app routes (behind Clerk auth)
+// Actual crew-chief app routes (behind Supabase auth)
 const THEME_PAGES = {
   setup_advice: '/setup',
   tech_explainer: '/engine',
@@ -22,11 +22,9 @@ async function ensureScreenshotDir() {
 
 async function loginAsDemo(page) {
   await page.goto(`${BASE_URL}/sign-in`, { waitUntil: 'networkidle' });
-  await page.fill('input[name="identifier"]', process.env.DEMO_USER_EMAIL);
-  await page.click('button:has-text("Continue")');
-  await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+  await page.fill('input[type="email"]', process.env.DEMO_USER_EMAIL);
   await page.fill('input[type="password"]', process.env.DEMO_USER_PASSWORD);
-  await page.click('button:has-text("Continue")');
+  await page.click('button[type="submit"]');
   await page.waitForURL('**/dashboard', { timeout: 15000 });
 }
 
