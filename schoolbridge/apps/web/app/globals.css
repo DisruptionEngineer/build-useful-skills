@@ -1,0 +1,311 @@
+@import "tailwindcss";
+
+/*
+ * SchoolBridge Global Styles
+ * Warm & friendly design system for school/parent platform.
+ *
+ * Color architecture:
+ *   - Light mode: cream backgrounds, amber accents, warm neutrals
+ *   - Dark mode: warm chocolate/espresso tones (never cold gray)
+ */
+
+/* ── Google Fonts ─────────────────────────────────────────────── */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
+
+/* ── CSS Custom Properties: Light Mode ────────────────────────── */
+:root {
+  /* ─ Background layers ─ */
+  --background: 40 33% 99%;          /* #FFFEFB – warm off-white */
+  --background-secondary: 39 100% 97%; /* #FFF8E8 – light cream */
+  --background-tertiary: 38 60% 95%;  /* #FAF0DC – deeper cream */
+
+  /* ─ Foreground / text ─ */
+  --foreground: 30 18% 15%;           /* #2A251C – warm near-black */
+  --foreground-muted: 30 10% 44%;     /* #7D786C – warm gray */
+
+  /* ─ Card surfaces ─ */
+  --card: 0 0% 100%;                  /* #FFFFFF */
+  --card-foreground: 30 18% 15%;      /* matches foreground */
+
+  /* ─ Popover / dropdown surfaces ─ */
+  --popover: 0 0% 100%;
+  --popover-foreground: 30 18% 15%;
+
+  /* ─ Primary: Amber / Orange ─ */
+  --primary: 32 93% 52%;              /* #F59115 */
+  --primary-hover: 28 95% 47%;        /* #E67A09 */
+  --primary-foreground: 0 0% 100%;    /* white text on amber */
+  --primary-soft: 34 100% 92%;        /* #FFEFD6 – tinted background */
+
+  /* ─ Secondary: Cream / Sand ─ */
+  --secondary: 36 60% 93%;            /* #FAF0DC */
+  --secondary-hover: 36 50% 88%;      /* #F5E3C0 */
+  --secondary-foreground: 30 18% 20%; /* dark warm text */
+
+  /* ─ Accent: Coral / Terracotta ─ */
+  --accent: 12 80% 60%;               /* #EA6548 */
+  --accent-hover: 12 72% 51%;         /* #D84A2C */
+  --accent-foreground: 0 0% 100%;
+  --accent-soft: 10 95% 95%;          /* #FEF4F2 */
+
+  /* ─ Muted backgrounds ─ */
+  --muted: 40 20% 95%;                /* #F5F4F0 */
+  --muted-foreground: 30 10% 44%;     /* #7D786C */
+
+  /* ─ Borders & rings ─ */
+  --border: 36 20% 88%;               /* #E8E6E0 */
+  --border-strong: 36 15% 78%;        /* #D6D3CA */
+  --input: 36 20% 88%;
+  --ring: 32 93% 52%;                 /* amber focus ring */
+
+  /* ─ Destructive / danger ─ */
+  --destructive: 0 84% 60%;           /* #EF4444 */
+  --destructive-hover: 0 72% 51%;     /* #DC2626 */
+  --destructive-foreground: 0 0% 100%;
+
+  /* ─ Semantic status colors ─ */
+  --status-pending: 38 92% 50%;       /* amber */
+  --status-pending-bg: 38 100% 94%;
+  --status-approved: 142 71% 45%;     /* green */
+  --status-approved-bg: 142 76% 94%;
+  --status-skipped: 30 10% 55%;       /* warm gray */
+  --status-skipped-bg: 40 20% 95%;
+  --status-failed: 0 84% 60%;         /* red */
+  --status-failed-bg: 0 93% 96%;
+  --status-synced: 217 91% 60%;       /* blue */
+  --status-synced-bg: 214 95% 95%;
+
+  /* ─ Layout ─ */
+  --sidebar-width: 280px;
+  --sidebar-width-collapsed: 72px;
+  --header-height: 64px;
+
+  /* ─ Border radius ─ */
+  --radius: 0.75rem;
+  --radius-sm: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  /* ─ Shadows (warm tint) ─ */
+  --shadow-color: 30 15% 20%;
+}
+
+/* ── CSS Custom Properties: Dark Mode ─────────────────────────── */
+.dark {
+  /* ─ Background layers (warm espresso/chocolate) ─ */
+  --background: 30 22% 8%;            /* #161310 – warm near-black */
+  --background-secondary: 30 20% 11%; /* #211D16 – warm dark brown */
+  --background-tertiary: 30 18% 14%;  /* #2A251C – lighter brown */
+
+  /* ─ Foreground / text ─ */
+  --foreground: 36 30% 92%;           /* #F5F2EE – warm off-white */
+  --foreground-muted: 30 12% 58%;     /* #9A9588 – warm mid-gray */
+
+  /* ─ Card surfaces ─ */
+  --card: 30 18% 12%;                 /* #211D16 */
+  --card-foreground: 36 30% 92%;
+
+  /* ─ Popover surfaces ─ */
+  --popover: 30 18% 14%;
+  --popover-foreground: 36 30% 92%;
+
+  /* ─ Primary: Amber (slightly brighter for contrast) ─ */
+  --primary: 32 95% 55%;              /* brighter amber */
+  --primary-hover: 32 93% 60%;
+  --primary-foreground: 30 22% 8%;    /* dark text on amber */
+  --primary-soft: 32 40% 16%;         /* dark amber tint */
+
+  /* ─ Secondary ─ */
+  --secondary: 30 15% 18%;
+  --secondary-hover: 30 15% 22%;
+  --secondary-foreground: 36 30% 88%;
+
+  /* ─ Accent: Coral ─ */
+  --accent: 12 75% 62%;
+  --accent-hover: 12 80% 68%;
+  --accent-foreground: 30 22% 8%;
+  --accent-soft: 12 30% 15%;
+
+  /* ─ Muted ─ */
+  --muted: 30 12% 16%;
+  --muted-foreground: 30 12% 58%;
+
+  /* ─ Borders & rings ─ */
+  --border: 30 12% 20%;
+  --border-strong: 30 12% 28%;
+  --input: 30 12% 20%;
+  --ring: 32 95% 55%;
+
+  /* ─ Destructive ─ */
+  --destructive: 0 72% 55%;
+  --destructive-hover: 0 72% 62%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* ─ Status colors (dark mode adjustments) ─ */
+  --status-pending: 38 92% 55%;
+  --status-pending-bg: 38 40% 14%;
+  --status-approved: 142 71% 50%;
+  --status-approved-bg: 142 30% 14%;
+  --status-skipped: 30 10% 50%;
+  --status-skipped-bg: 30 10% 16%;
+  --status-failed: 0 84% 58%;
+  --status-failed-bg: 0 40% 14%;
+  --status-synced: 217 91% 62%;
+  --status-synced-bg: 217 40% 14%;
+}
+
+/* ── Base Layer ───────────────────────────────────────────────── */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    line-height: 1.6;
+  }
+
+  /* Warm selection highlight */
+  ::selection {
+    background-color: hsl(var(--primary) / 0.20);
+    color: hsl(var(--foreground));
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background-secondary));
+    border-radius: var(--radius);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: var(--radius);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+
+  /* Focus-visible ring style */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Heading defaults */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    line-height: 1.25;
+    color: hsl(var(--foreground));
+  }
+}
+
+/* ── Utility Layer ────────────────────────────────────────────── */
+@layer utilities {
+  /* Warm gradient backgrounds */
+  .bg-gradient-warm {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--primary-soft)) 0%,
+      hsl(var(--background)) 50%,
+      hsl(var(--accent-soft)) 100%
+    );
+  }
+
+  .bg-gradient-amber {
+    background: linear-gradient(
+      135deg,
+      hsl(32 93% 52%) 0%,
+      hsl(28 95% 47%) 100%
+    );
+  }
+
+  .bg-gradient-sunset {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--primary)) 0%,
+      hsl(var(--accent)) 100%
+    );
+  }
+
+  /* Text gradient */
+  .text-gradient-warm {
+    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Warm glassmorphism */
+  .glass-warm {
+    background: hsl(var(--card) / 0.80);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    border: 1px solid hsl(var(--border) / 0.50);
+  }
+
+  /* Animated hover lift */
+  .hover-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px -5px hsl(var(--shadow-color) / 0.10),
+                0 4px 10px -4px hsl(var(--shadow-color) / 0.06);
+  }
+
+  /* Warm dot pattern background */
+  .bg-dots-warm {
+    background-image: radial-gradient(
+      hsl(var(--border)) 1px,
+      transparent 1px
+    );
+    background-size: 24px 24px;
+  }
+
+  /* Animated gradient border */
+  .border-gradient-warm {
+    border-image: linear-gradient(
+      135deg,
+      hsl(var(--primary)) 0%,
+      hsl(var(--accent)) 100%
+    ) 1;
+  }
+}
+
+/* ── Component Layer ──────────────────────────────────────────── */
+@layer components {
+  /* Smooth page transitions */
+  .page-transition {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
