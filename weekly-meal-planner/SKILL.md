@@ -374,7 +374,7 @@ async function extractRecipesFromCollection(collectionUrl, maxRecipes = MAX_RECI
 1. Always prefer **individual recipe pages** — URLs like `budgetbytes.com/slow-cooker-chicken-tikka-masala/`. When a search result is a collection page (e.g., `allrecipes.com/gallery/best-dinners/`), crawl it to extract individual recipe links instead of discarding it.
 2. Every candidate URL MUST have a single recipe with: a title, cook time, ingredients list, and instructions
 3. Prefer recipe blogs known for clean structured data: Budget Bytes, Damn Delicious, Cooking Classy, Half Baked Harvest, Pinch of Yum, Serious Eats, Bon Appetit, Skinnytaste, The Recipe Critic
-4. Avoid category/gallery/collection pages from allrecipes.com, tasteofhome.com, foodnetwork.com, thepioneerwoman.com — their individual recipe pages are fine, but their roundup/gallery URLs are not
+4. For allrecipes.com, tasteofhome.com, foodnetwork.com, thepioneerwoman.com — prefer their individual recipe pages as direct search targets. If a collection/gallery page from these sites appears in results, still crawl it for individual recipe links per rule 10, but deprioritize these extracted links behind candidates from preferred recipe blogs (rule 3).
 5. Before adding a candidate, verify the URL path looks like a single recipe slug (e.g. `/chicken-tikka-masala/`) not a category path (e.g. `/gallery/best-chicken-recipes/`)
 6. Apply `isIndividualRecipeURL()` to every candidate before posting to Discord
 7. Respect `dietary_notes` — no shellfish for Rachel, cooking for 2 adults
