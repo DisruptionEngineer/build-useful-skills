@@ -252,7 +252,7 @@ function buildReason(day, recipe) {
 
 ### Search Recipes
 
-Find individual recipe pages that match the week's meal styles and household preferences. **Never return collection/listicle/gallery pages** — only single-recipe URLs that Mealie can import via JSON-LD `Recipe` schema.
+Find individual recipe pages that match the week's meal styles and household preferences. When search results include collection/listicle/gallery pages, crawl them to extract individual recipe URLs. Only individual single-recipe URLs (importable via JSON-LD `Recipe` schema) should become candidates.
 
 ```javascript
 async function searchRecipes(planId, prefs, count) {
@@ -371,7 +371,7 @@ async function extractRecipesFromCollection(collectionUrl, maxRecipes = MAX_RECI
 6. If a collection page yields zero valid individual recipes after crawling, discard it and move on
 
 **Search rules for the agent:**
-1. Always search for **individual recipe pages** — URLs like `budgetbytes.com/slow-cooker-chicken-tikka-masala/` not `allrecipes.com/gallery/best-dinners/`
+1. Always prefer **individual recipe pages** — URLs like `budgetbytes.com/slow-cooker-chicken-tikka-masala/`. When a search result is a collection page (e.g., `allrecipes.com/gallery/best-dinners/`), crawl it to extract individual recipe links instead of discarding it.
 2. Every candidate URL MUST have a single recipe with: a title, cook time, ingredients list, and instructions
 3. Prefer recipe blogs known for clean structured data: Budget Bytes, Damn Delicious, Cooking Classy, Half Baked Harvest, Pinch of Yum, Serious Eats, Bon Appetit, Skinnytaste, The Recipe Critic
 4. Avoid category/gallery/collection pages from allrecipes.com, tasteofhome.com, foodnetwork.com, thepioneerwoman.com — their individual recipe pages are fine, but their roundup/gallery URLs are not
@@ -380,6 +380,7 @@ async function extractRecipesFromCollection(collectionUrl, maxRecipes = MAX_RECI
 7. Respect `dietary_notes` — no shellfish for Rachel, cooking for 2 adults
 8. Respect `household_rules` — Saturday adventure, weeknight ≤45min unless crockpot, ≥1 vegetarian/week, Friday lighter fare
 9. Each candidate object must include: `{ id: uuid(), title, description, total_time_min, tags, source_url, cuisine, difficulty, servings }`
+10. When a search result fails `isIndividualRecipeURL()`, treat it as a collection page: fetch it, extract individual recipe links using `extractRecipesFromCollection()`, validate each, and add valid ones to candidates. Never discard a collection without first attempting to extract recipes from it.
 
 ### Weekly Cycle
 
