@@ -118,6 +118,8 @@ const CONFIG_PATH = path.join(process.env.HOME, '.agents', 'data', 'tenths-socia
 const QUEUE_PATH = path.join(process.env.HOME, '.agents', 'data', 'tenths-social-queue.json');
 const AUTH_PATH = path.join(process.env.HOME, '.agents', 'config', 'authorized-users.json');
 const REPO_PATH = path.join(process.env.HOME, 'Code', 'crew-chief');
+const { getTopThemes } = require('./insights');
+const { captureScreenshots } = require('./screenshots');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -184,6 +186,10 @@ async function handleGenerate(message, theme) {
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const context = buildContentContext(config, theme);
   try {
+    // Capture fresh screenshots before generating content
+    try { await captureScreenshots(); } catch (err) {
+      console.warn('[tenths-social] Screenshot capture failed:', err.message);
+    }
     const drafts = await generateDrafts(context, theme);
     const queue = loadQueue();
     let nextId = queue.posts.length + 1;
@@ -207,24 +213,35 @@ function buildContentContext(config, theme) {
   try { changelog = execSync('git log --oneline --since="14 days ago" --no-merges',
     { cwd: REPO_PATH, encoding: 'utf8', timeout: 10000 }).trim(); } catch { changelog = 'No recent commits'; }
   const m = new Date().getMonth();
+  const topThemes = getTopThemes(3);
   return { brand: config.brand, changelog, racingSeason: (m >= 3 && m <= 9) ? 'in-season' : 'off-season',
     dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
     requestedTheme: theme || null, availableThemes: config.content_themes,
     features: ['Setup calculator', 'Engine simulator', 'Corner weight calc', 'Gear ratio calc',
       'Diagnostic troubleshooter', 'Session logger', 'Division rulebooks (2026)', 'Tech inspection checklists'],
     divisions: ['Ironman F8', 'Old School F8', 'Street Stock', 'Juicebox', 'Compacts'],
-    targetAudience: 'Short-track racers who wrench their own cars.' };
+    targetAudience: 'Short-track racers who wrench their own cars.',
+    fbTopThemes: topThemes };
 }
 
 async function generateDrafts(context, theme) {
-  const prompt = `Generate 2-3 tweets for Tenths racing app (tenths.racing).
+  const fbInsightLine = context.fbTopThemes.length
+    ? `\nFB TOP THEMES: ${context.fbTopThemes.join('; ')}. Lean toward these but maintain variety.`
+    : '';
+
+  const prompt = `Generate 2-3 social posts for Tenths racing app (tenths.racing).
 VOICE: ${context.brand.voice} | TAGLINE: ${context.brand.tagline}
 SEASON: ${context.racingSeason} | DAY: ${context.dayOfWeek}
 ${context.requestedTheme ? `THEME: ${context.requestedTheme}` : `THEMES: ${context.availableThemes.join(', ')}`}
 CHANGELOG: ${context.changelog}
 FEATURES: ${context.features.join('; ')}
-DIVISIONS: ${context.divisions.join(', ')} | AUDIENCE: ${context.targetAudience}
-Return JSON array: [{ theme, content: { x: { text (max 280 chars), char_count } } }]`;
+DIVISIONS: ${context.divisions.join(', ')} | AUDIENCE: ${context.targetAudience}${fbInsightLine}
+
+Generate for TWO platforms per post:
+- x: Punchy tweet, max 280 chars
+- fb: Facebook post, 2-4 descriptive sentences (~500 chars), include hashtags and call-to-action to tenths.racing
+
+Return JSON array: [{ theme, content: { x: { text, char_count }, fb: { text, char_count, hashtags: [] } } }]`;
 
   const escaped = prompt.replace(/'/g, "'\\''");
   try {
