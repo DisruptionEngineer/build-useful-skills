@@ -273,10 +273,16 @@ async function handleQuickPost(message, text) {
   const queue = loadQueue();
   const post = { id: `POST-${String(queue.posts.length + 1).padStart(4, '0')}`,
     created_at: new Date().toISOString(), status: 'quick-draft', theme: 'on_demand',
-    content: { x: { text, char_count: text.length } },
+    content: {
+      x: { text, char_count: text.length },
+      fb: { text, char_count: text.length, hashtags: [] }
+    },
     scheduled_at: null, posted_at: null, discord_message_id: null, platform_post_ids: {} };
   const embed = new EmbedBuilder().setTitle('⚡ Quick Post Preview').setColor(0xFF8A00)
-    .addFields({ name: '𝕏 Post', value: `\`\`\`\n${text}\n\`\`\`\n${text.length}/280 chars` })
+    .addFields(
+      { name: '𝕏 Post', value: `\`\`\`\n${text}\n\`\`\`\n${text.length}/280 chars` },
+      { name: '📘 Facebook Post', value: `\`\`\`\n${text}\n\`\`\`\n${text.length} chars` }
+    )
     .setTimestamp().setFooter({ text: `${post.id} · ✅ post now · ❌ discard` });
   const sent = await message.channel.send({ embeds: [embed] });
   await sent.react('✅'); await sent.react('❌');
@@ -284,10 +290,18 @@ async function handleQuickPost(message, text) {
 }
 
 function buildDraftEmbed(post) {
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle(`🏁 Draft: ${post.theme.replace(/_/g, ' ').toUpperCase()}`).setColor(0xFF8A00)
-    .addFields({ name: '𝕏 Post', value: `\`\`\`\n${post.content.x.text}\n\`\`\`\n${post.content.x.char_count}/280 chars` })
-    .setTimestamp().setFooter({ text: `${post.id} · React: ✅ approve · ✏️ edit · ❌ reject` });
+    .addFields({ name: '𝕏 Post', value: `\`\`\`\n${post.content.x.text}\n\`\`\`\n${post.content.x.char_count}/280 chars` });
+
+  if (post.content.fb) {
+    const fbText = post.content.fb.hashtags && post.content.fb.hashtags.length
+      ? `${post.content.fb.text}\n${post.content.fb.hashtags.join(' ')}`
+      : post.content.fb.text;
+    embed.addFields({ name: '📘 Facebook Post', value: `\`\`\`\n${fbText}\n\`\`\`\n${post.content.fb.char_count} chars` });
+  }
+
+  return embed.setTimestamp().setFooter({ text: `${post.id} · React: ✅ approve · ✏️ edit · ❌ reject` });
 }
 
 client.on('messageReactionAdd', async (reaction, user) => {
