@@ -1,12 +1,12 @@
 ---
 name: tenths-social-manager
-description: Manage social media for tenths.racing on X/Twitter via Discord and manage racing data in Supabase. Use when generating draft social posts, reviewing content batches, approving or rejecting scheduled posts, posting on-demand tweets, checking post history, auto-publishing approved content to X, managing the content calendar, looking up or adding tracks/cars/tires to the Supabase database, researching racing data via AI and web sources, or creating promo/trial links for Tenths Pro.
+description: Manage social media for tenths.racing on X/Twitter and Facebook via Discord. Use when generating draft social posts, reviewing content batches, approving or rejecting scheduled posts, posting to X and Facebook, checking post history, auto-publishing approved content, managing the content calendar, looking up or adding tracks/cars/tires to Supabase, researching racing data, or creating promo/trial links for Tenths Pro.
 metadata: {"clawdbot":{"emoji":"🏁","os":["linux","darwin"]}}
 ---
 
 # Tenths Social Manager
 
-Generate, review, and publish social media content for tenths.racing on X/Twitter. Twice weekly, the agent generates 2-3 draft posts using AI, posts them as rich embeds to Discord for review, and auto-publishes approved content at scheduled times. Also manages the Supabase racing database -- look up, research, and insert tracks, cars, and tires via Discord commands.
+Generate, review, and publish social media content for tenths.racing on X/Twitter and Facebook. Twice weekly, the agent generates 2-3 draft posts (platform-native for both X and Facebook) using AI, posts them as rich embeds to Discord for review, and auto-publishes approved content at scheduled times. Facebook posts include auto-generated app screenshots. Facebook Insights analytics feed back into content generation to optimize themes. Also manages the Supabase racing database -- look up, research, and insert tracks, cars, and tires via Discord commands.
 
 ## When to Use
 
@@ -82,6 +82,18 @@ Each post has `id`, `status` (draft/quick-draft/approved/editing/rejected/posted
       "fb": { "text": "Getting your cross-weight dialed in is the single biggest setup change you can make at a short track. Most racers chase springs and shocks, but nailing your cross-weight percentage first gives you a consistent baseline to tune from.", "char_count": 248, "hashtags": ["#shorttrackracing", "#setuptips"] }
     },
     "scheduled_at": null, "posted_at": null, "discord_message_id": null, "platform_post_ids": {} }] }
+```
+
+### Facebook Insights -- `~/.agents/data/tenths-fb-insights.json`
+
+Engagement metrics per post and aggregated theme performance. Updated daily by cron.
+
+```json
+{
+  "last_fetched": "2026-03-07T12:00:00Z",
+  "posts": { "POST-0012": { "fb_post_id": "123456", "theme": "racing_tip", "metrics": { "reactions": 24, "comments": 5, "shares": 3, "clicks": 18 } } },
+  "theme_performance": { "racing_tip": { "avg_engagement": 42, "post_count": 8, "trend": "up" } }
+}
 ```
 
 ## Discord Commands
@@ -405,6 +417,29 @@ async function publishToAllPlatforms(post) {
 }
 ```
 
+## App Screenshots
+
+Playwright captures screenshots of tenths.racing feature pages for Facebook posts. Runs before each content generation batch.
+
+```javascript
+const { captureScreenshots, getScreenshotPath, THEME_PAGES } = require('./screenshots');
+// captureScreenshots() -- logs in as demo user, navigates each theme page, saves 1200x630 PNGs
+// getScreenshotPath(theme) -- returns file path if screenshot exists, null otherwise
+// See screenshots.js for full implementation
+```
+
+## Facebook Insights
+
+Daily cron fetches engagement metrics from the Facebook Page and computes per-theme performance.
+
+```javascript
+const { fetchFBInsights, getTopThemes } = require('./insights');
+// fetchFBInsights() -- pulls last 30 days of post metrics, computes theme_performance
+// getTopThemes(3) -- returns ["racing tip (avg 42, trending up)", ...] for generation prompt
+// Data stored in ~/.agents/data/tenths-fb-insights.json
+// See insights.js for full implementation
+```
+
 ## Scheduling and Auto-Publish
 
 ```javascript
@@ -430,9 +465,10 @@ async function checkAndPublish() {
 ```
 
 ```bash
-# Cron: generate Mon/Thu 8AM ET, publish every 15min
+# Cron: generate Mon/Thu 8AM ET, publish every 15min, insights daily 6AM ET
 0 12 * * 1,4 cd ~/.agents && openclaw agent --message "Run !tenths generate in #tenths-social" --timeout 120 2>&1 >> ~/logs/tenths-social.log
 */15 * * * * cd ~/.agents && node -e "require('./skills/tenths-social-manager/publisher.js').checkAndPublish()" 2>&1 >> ~/logs/tenths-social.log
+0 10 * * * cd ~/.agents && node -e "require('./skills/tenths-social-manager/insights.js').fetchFBInsights()" 2>&1 >> ~/logs/tenths-social.log
 ```
 
 ## Queue and History
@@ -695,6 +731,8 @@ Divisions: ironman-f8, old-school-f8, street-stock, compacts, juicebox. Return O
 
 X: developer.x.com -> Console -> New app -> Read+Write permissions -> Generate all 4 OAuth 1.0a keys.
 
+Facebook: developers.facebook.com -> Create App -> Add Facebook Login + Pages API products -> Create "Tenths Racing" Page -> Graph API Explorer -> Get Page Access Token with pages_manage_posts, pages_read_engagement -> Exchange for long-lived token. Set profile pic and cover photo from crew-chief/public/fb-profile.png and fb-banner.png.
+
 ## Troubleshooting
 
 ```bash
@@ -707,6 +745,13 @@ X: developer.x.com -> Console -> New app -> Read+Write permissions -> Generate a
 # Supabase insert 403 -> check SUPABASE_SERVICE_ROLE_KEY is set (anon key is read-only).
 # Supabase "relation tires does not exist" -> run the tires migration SQL first.
 # Research returns bad data -> OpenClaw may hallucinate specs. Always review before approving.
+# FB "OAuthException" -> Page Access Token expired. Run refreshPageToken() or regenerate in Graph Explorer.
+# FB "Unsupported post request" -> check FB_PAGE_ID is the Page ID, not the App ID.
+# FB photo upload fails -> ensure formdata-node is installed: npm install formdata-node
+# Screenshots blank/login page -> DEMO_USER_EMAIL/PASSWORD wrong or Clerk login flow changed.
+# Playwright not found -> npm install playwright && npx playwright install chromium
+# Screenshots stale -> captureScreenshots() runs before each generate. Check logs for errors.
+# FB insights empty -> Page needs >= 100 followers for some metrics. Basic metrics work immediately.
 ```
 
 ## Tips
@@ -717,4 +762,8 @@ X: developer.x.com -> Console -> New app -> Read+Write permissions -> Generate a
 - AI entity research is best-effort. Always verify specs against official sources before approving.
 - Seed tires table via `!tenths addtire` for each compound in `tires.ts`. Use `!tenths lookup` first to avoid dupes.
 - `!tenths promo` defaults to 30 days free, unlimited uses. Add args for custom trials: `!tenths promo 14 50 Race day special`.
-- Multi-platform expansion: add platform configs and publishing functions as needed.
+- Facebook posts include screenshots for visual themes (setup_advice, tech_explainer, etc). Text-only for polls and race-day prompts.
+- FB insights drive content themes after ~2 weeks of data. Initial posts use even theme distribution.
+- Page Access Tokens expire ~60 days. Set a calendar reminder or use refreshPageToken() in publisher-fb.js.
+- Dependencies: playwright, formdata-node. Install with: npm install playwright formdata-node && npx playwright install chromium
+- Multi-platform expansion: X and Facebook are live. Add more platforms by extending publishToAllPlatforms() and the content generation prompt.
