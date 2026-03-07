@@ -32,6 +32,17 @@ export SUPABASE_URL="https://ssoybleustqhracbvrho.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 ```
 
+```bash
+# Facebook Page (Meta Graph API)
+export FB_PAGE_ID="your-page-id"
+export FB_PAGE_ACCESS_TOKEN="your-page-access-token"
+export FB_APP_ID="your-app-id"
+export FB_APP_SECRET="your-app-secret"
+# Demo user for screenshots (Clerk auth)
+export DEMO_USER_EMAIL="demo@tenths.racing"
+export DEMO_USER_PASSWORD="your-demo-password"
+```
+
 ## Data Files
 
 ### Config -- `~/.agents/data/tenths-social-config.json`
@@ -39,8 +50,20 @@ export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 ```json
 {
   "schedule": { "generate_days": ["monday","thursday"], "generate_time": "08:00", "post_times": ["12:00","18:00"], "timezone": "America/New_York" },
-  "platforms": { "x": { "enabled": true, "auto_post": true } },
+  "platforms": {
+    "x": { "enabled": true, "auto_post": true },
+    "fb": { "enabled": true, "auto_post": true }
+  },
   "content_themes": ["feature_announcement","racing_tip","setup_advice","community_poll","race_day_prompt","tech_explainer","product_highlight"],
+  "screenshot_pages": {
+    "setup_advice": "/setup",
+    "tech_explainer": "/engine",
+    "feature_announcement": "/dashboard",
+    "racing_tip": "/calculators/gear-ratio",
+    "product_highlight": "/calculators",
+    "community_poll": null,
+    "race_day_prompt": null
+  },
   "brand": {
     "name": "Tenths", "tagline": "Every Tenth Matters.", "url": "https://tenths.racing", "color": "#FF8A00",
     "voice": "Technical but approachable. Talk like a fellow racer in the pits, not a marketing team. Short sentences. Use racing terminology naturally."
@@ -54,7 +77,10 @@ Each post has `id`, `status` (draft/quick-draft/approved/editing/rejected/posted
 
 ```json
 { "posts": [{ "id": "POST-0001", "status": "draft", "theme": "racing_tip",
-    "content": { "x": { "text": "Your cross-weight % matters more than...", "char_count": 234 } },
+    "content": {
+      "x": { "text": "Your cross-weight % matters more than...", "char_count": 234 },
+      "fb": { "text": "Getting your cross-weight dialed in is the single biggest setup change you can make at a short track. Most racers chase springs and shocks, but nailing your cross-weight percentage first gives you a consistent baseline to tune from.", "char_count": 248, "hashtags": ["#shorttrackracing", "#setuptips"] }
+    },
     "scheduled_at": null, "posted_at": null, "discord_message_id": null, "platform_post_ids": {} }] }
 ```
 
