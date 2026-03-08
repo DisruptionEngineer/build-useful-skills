@@ -39,7 +39,7 @@ async function createRacenightPromo(track, config) {
 
   if (existing) {
     console.log(`[promo] Already exists: ${code}`);
-    return { code, url: `https://tenths.racing/promo/${code}`, existing: true };
+    return { code, url: `https://tenths.racing/promo/${code}`, max_uses: maxUses, expires: validUntil, existing: true };
   }
 
   const { error } = await supabase.from('promotions').insert({
