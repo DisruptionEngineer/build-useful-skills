@@ -114,6 +114,7 @@ Engagement metrics per post and aggregated theme performance. Updated daily by c
 | `!tenths addcar <year> <make> <model>` | Research and add a car to Supabase |
 | `!tenths addtire <brand> <model>` | Research and add a tire to Supabase |
 | `!tenths promo [days] [max_uses] [description]` | Create a promo link (default: 30-day trial) |
+| `!tenths racenight [state]` | Discover tonight's races, generate personalized FB posts + promos |
 
 ## Command Handler
 
@@ -132,6 +133,7 @@ const AUTH_PATH = path.join(process.env.HOME, '.agents', 'config', 'authorized-u
 const REPO_PATH = path.join(process.env.HOME, 'Code', 'crew-chief');
 const { getTopThemes } = require('./insights');
 const { captureScreenshots } = require('./screenshots');
+const { handleRacenight } = require('./racenight');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -165,9 +167,24 @@ client.on('messageCreate', async (message) => {
     case 'addcar':    await handleAddEntity(message, 'car', args.slice(1)); break;
     case 'addtire':   await handleAddEntity(message, 'tire', args.slice(1)); break;
     case 'promo':     await handlePromo(message, args.slice(1)); break;
-    default:          await message.reply('Commands: `generate`, `quick`, `queue`, `schedule`, `history`, `post`, `themes`, `stats`, `lookup`, `addtrack`, `addcar`, `addtire`, `promo`');
+    case 'racenight': await handleRacenightCommand(message, args.slice(1)); break;
+    default:          await message.reply('Commands: `generate`, `quick`, `queue`, `schedule`, `history`, `post`, `themes`, `stats`, `lookup`, `addtrack`, `addcar`, `addtire`, `promo`, `racenight`');
   }
 });
+
+async function handleRacenightCommand(message, args) {
+  const stateOverride = args[0] || null; // e.g., "TX"
+  await message.react('⏳');
+  try {
+    await handleRacenight(message, stateOverride);
+    await message.reactions.cache.get('⏳')?.remove();
+    await message.react('🏁');
+  } catch (err) {
+    await message.reactions.cache.get('⏳')?.remove();
+    await message.react('❌');
+    await message.reply(`Race night failed:\n\`\`\`\n${err.message.slice(0, 500)}\n\`\`\``);
+  }
+}
 
 function isAuthorized(discordId) {
   try {
