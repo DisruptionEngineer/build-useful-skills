@@ -52,7 +52,9 @@ async function captureRacenightScreenshots(tracks, config) {
 
   try {
     for (const track of tracks) {
-      const abbrev = track.abbreviation || track.name.substring(0, 3).toUpperCase();
+      const abbrev = track.abbreviation
+        || (track.name && track.name.substring(0, 3).toUpperCase())
+        || 'UNK';
       const { route, label } = getScreenshotRoute(track);
       const filename = `${abbrev}-${today}.png`;
       const filePath = path.join(SCREENSHOT_DIR, filename);
@@ -99,7 +101,7 @@ function cleanupOldScreenshots(days) {
   for (const file of files) {
     const filePath = path.join(SCREENSHOT_DIR, file);
     const stat = fs.statSync(filePath);
-    if (stat.mtimeMs < cutoff) {
+    if (stat.isFile() && stat.mtimeMs < cutoff) {
       fs.unlinkSync(filePath);
       cleaned++;
     }
