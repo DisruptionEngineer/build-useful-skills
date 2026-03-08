@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
     "formdata-node": "^6.0.3",
     "playwright": "^1.58.2"
   }
