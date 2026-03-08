@@ -24,9 +24,6 @@ async function createRacenightPromo(track, config) {
   tomorrow.setUTCHours(expiryHourUTC, 0, 0, 0);
   const validUntil = tomorrow.toISOString();
 
-  // valid_from: now
-  const validFrom = today.toISOString();
-
   const maxUses = config.promo_max_uses || 10;
   const description = `Race night promo - ${track.name} ${today.getMonth() + 1}/${today.getDate()}`;
 
@@ -46,8 +43,7 @@ async function createRacenightPromo(track, config) {
     code,
     trial_days: 1,
     max_uses: maxUses,
-    valid_from: validFrom,
-    valid_until: validUntil,
+    expires_at: validUntil,
     description,
     is_active: true,
     racenight: true,

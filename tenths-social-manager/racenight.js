@@ -20,6 +20,9 @@ const COLOR_ERROR = 0xFF0000;
 const COLOR_WARNING = 0xFFAA00;
 const COLOR_DONE = 0x00FF00;
 
+// Simple mutex to prevent concurrent monkey-patching of screenshots.getScreenshotPath
+let publishLock = Promise.resolve();
+
 /**
  * Main racenight orchestrator.
  * Called by: !tenths racenight [optional state]
@@ -269,6 +272,13 @@ function setupReactionHandlers(trackMessages, summaryMsg, config, channel) {
  * Approve a single track: create promo, post to Facebook, notify channel.
  */
 async function approveTrack(track, config, channel) {
+  // Serialize publish operations to prevent concurrent monkey-patching
+  // of screenshots.getScreenshotPath
+  publishLock = publishLock.then(() => doApproveTrack(track, config, channel));
+  return publishLock;
+}
+
+async function doApproveTrack(track, config, channel) {
   try {
     // 1. Create promo in Supabase
     const promo = await createRacenightPromo(track, config);
