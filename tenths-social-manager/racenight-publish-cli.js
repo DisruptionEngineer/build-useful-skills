@@ -1,4 +1,4 @@
-#\!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * CLI runner for publishing a single racenight track.
  * Creates the promo in Supabase and posts to Facebook.
@@ -10,6 +10,10 @@ const { loadRacenightConfig } = require("./racenight-config");
 const { createRacenightPromo } = require("./racenight-promo");
 const { postToFacebook } = require("./publisher-fb");
 const screenshots = require("./screenshots");
+
+// Redirect console.log to stderr so only JSON goes to stdout.
+const _origLog = console.log;
+console.log = (...args) => console.error(...args);
 
 async function main() {
   let input = "";

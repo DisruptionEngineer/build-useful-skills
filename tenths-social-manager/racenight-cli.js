@@ -1,4 +1,4 @@
-#\!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * CLI runner for racenight discovery pipeline.
  * Runs: scrape → enrich → tips → screenshots → post generation
@@ -17,6 +17,12 @@ const {
 } = require("./racenight-screenshots");
 const { generateRacenightPost } = require("./racenight-post-generator");
 
+// Redirect console.log to stderr so only JSON goes to stdout.
+// Imported modules (scraper, enrichment, etc.) use console.log for logging,
+// which would otherwise pollute the JSON output stream.
+const _origLog = console.log;
+console.log = (...args) => console.error(...args);
+
 async function main() {
   const args = process.argv.slice(2);
   const stateIdx = args.indexOf("--state");
@@ -29,7 +35,7 @@ async function main() {
   console.error("[cli] Scraping MyRacePass...");
   const result = await scrapeMyRacePass(config, stateOverride);
 
-  if (\!result.structured || \!result.tracks || result.tracks.length === 0) {
+  if (!result.structured || !result.tracks || result.tracks.length === 0) {
     const output = {
       success: false,
       error: result.structured
