@@ -1,16 +1,22 @@
 const { chromium } = require('playwright');
-const { matchDivision } = require('./racenight-config');
 
 /**
- * Scrapes MyRacePass for tonight's races.
- * MyRacePass URL pattern: https://www.myracepass.com/schedule/?d=YYYY-MM-DD
+ * Scrapes MyRacePass for tonight's events.
  *
- * NOTE: MyRacePass page structure may change. If selectors break,
- * inspect https://www.myracepass.com/schedule/ and update selectors below.
+ * As of March 2026, MyRacePass uses:
+ *   URL:  /events/today  (old /schedule/?d= now 302-redirects to home)
+ *   DOM:  .mrp-rowCard  cards with:
+ *         - h3 > a[href*="/events/"]  → track name + event URL
+ *         - p.text-muted              → date + event description
+ *
+ * Location/state is NOT available on the list page.
+ * Filtering by region happens AFTER enrichment in racenight-cli.js.
+ *
+ * NOTE: If selectors break again, inspect /events/today and update below.
  */
-async function scrapeMyRacePass(config, stateOverride) {
-  const today = new Date().toISOString().split('T')[0];
-  const regions = stateOverride ? [stateOverride.toUpperCase()] : config.regions;
+async function scrapeMyRacePass(config, _stateOverride) {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -21,85 +27,77 @@ async function scrapeMyRacePass(config, stateOverride) {
   const tracks = [];
 
   try {
-    const url = `https://www.myracepass.com/schedule/?d=${today}`;
-    console.log(`[scraper] Fetching ${url}`);
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(2000);
+    const url = 'https://www.myracepass.com/events/today';
+    console.log(`[scraper] Fetching ${url} (local date: ${today})`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // Give JS-rendered content time to populate
+    await page.waitForTimeout(5000);
 
-    // Extract event data from the page
+    // Extract event cards from the new MRP layout
     const events = await page.evaluate(() => {
-      const results = [];
-
-      // MyRacePass uses various layouts — try common patterns
-      const eventElements = document.querySelectorAll(
-        '.schedule-event, .event-row, [class*="event"], .race-listing, tr[class*="event"]'
-      );
-
-      for (const el of eventElements) {
-        const text = el.textContent || '';
-        const trackEl = el.querySelector(
-          '.track-name, .event-track, [class*="track"], a[href*="/tracks/"]'
-        );
-        const locationEl = el.querySelector(
-          '.track-location, .event-location, [class*="location"], [class*="city"]'
-        );
-        const classEls = el.querySelectorAll(
-          '.race-class, .event-class, [class*="class"], [class*="division"]'
-        );
-
-        if (trackEl) {
-          results.push({
-            name: trackEl.textContent?.trim() || '',
-            url: trackEl.href || '',
-            location: locationEl?.textContent?.trim() || '',
-            classes: Array.from(classEls).map(c => c.textContent?.trim()).filter(Boolean),
-            raw_text: text.substring(0, 500)
-          });
-        }
-      }
-
-      // Fallback: if no structured elements found, return page text
-      if (results.length === 0) {
+      const cards = document.querySelectorAll('.mrp-rowCard');
+      if (cards.length === 0) {
+        // Fallback: return raw page text for debugging
         const body = document.body?.innerText || '';
         return [{ fallback: true, raw_text: body.substring(0, 5000) }];
+      }
+
+      const results = [];
+      for (const card of cards) {
+        const info = card.querySelector('.mrp-rowCardInfo');
+        if (!info) continue;
+
+        // Track name from h3 > a
+        const nameLink = info.querySelector('h3 a[href*="/events/"]');
+        if (!nameLink) continue;
+
+        // Event description from the second p.text-muted (first is date)
+        const mutedEls = info.querySelectorAll('p.text-muted');
+        const description = mutedEls.length > 1
+          ? mutedEls[1].textContent?.trim() || ''
+          : '';
+
+        results.push({
+          name: nameLink.textContent?.trim() || '',
+          event_url: nameLink.href || '',
+          description: description,
+        });
       }
 
       return results;
     });
 
-    // If we got fallback text, return it for AI parsing
+    // Fallback path — page loaded but no cards found
     if (events.length === 1 && events[0].fallback) {
-      console.log('[scraper] Structured extraction failed, returning raw text for AI parsing');
+      console.log('[scraper] No .mrp-rowCard elements found, returning raw text');
       await browser.close();
       return { raw_text: events[0].raw_text, structured: false };
     }
 
-    // Process structured results
+    console.log(`[scraper] Extracted ${events.length} event cards`);
+
+    // De-duplicate by track name (same track may appear in multiple sections)
+    const seen = new Set();
     for (const event of events) {
-      const stateMatch = event.location.match(/\b([A-Z]{2})\b/);
-      const state = stateMatch ? stateMatch[1] : null;
+      const key = event.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
 
-      // Filter by region
-      if (state && !regions.includes(state)) continue;
-
-      // Match divisions
-      const matchedDivisions = [];
-      for (const cls of event.classes) {
-        const matched = matchDivision(cls, config);
-        if (matched) matchedDivisions.push({ original: cls, matched });
+      // Skip practice-only and canceled events
+      const desc = event.description.toUpperCase();
+      if (desc.includes('CANCELED') || desc.includes('CANCELLED')) {
+        console.log(`[scraper] Skipping canceled: ${event.name}`);
+        continue;
       }
-
-      // Only include if at least one compatible division
-      if (matchedDivisions.length === 0 && event.classes.length > 0) continue;
 
       tracks.push({
         name: event.name,
-        state: state,
-        location: event.location,
-        divisions_tonight: matchedDivisions.map(d => d.original),
-        matched_divisions: matchedDivisions.map(d => d.matched),
-        myracepass_url: event.url || null,
-        raw_classes: event.classes
+        state: null,          // populated during enrichment
+        location: '',         // populated during enrichment
+        divisions_tonight: [],  // populated from event page or enrichment
+        matched_divisions: [],
+        myracepass_url: event.event_url,
+        event_description: event.description,
       });
     }
   } catch (err) {
@@ -115,7 +113,7 @@ async function scrapeMyRacePass(config, stateOverride) {
     tracks.length = max;
   }
 
-  console.log(`[scraper] Found ${tracks.length} matching tracks for ${today}`);
+  console.log(`[scraper] Found ${tracks.length} events for ${today}`);
   return { tracks, structured: true };
 }
 

@@ -1,5 +1,4 @@
 const { createClient } = require('@supabase/supabase-js');
-const { execAsync } = require('./utils');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -9,7 +8,7 @@ const supabase = createClient(
 /**
  * Enrich a list of discovered tracks with:
  * 1. Supabase cached data (if known)
- * 2. AI-researched data (if new)
+ * 2. Nominatim geocoding (if new — gets lat/lng/state)
  * 3. Tonight's weather from Open-Meteo
  */
 async function enrichTracks(tracks) {
@@ -23,10 +22,12 @@ async function enrichTracks(tracks) {
 
     let trackData;
     if (cached) {
-      console.log(`[enrich] Cache hit: ${track.name}`);
+      console.log(`[enrich] Cache hit: ${track.name} (${cached.state})`);
       trackData = {
         ...track,
         is_known: true,
+        state: cached.state || track.state,
+        location: cached.location || track.location,
         surface: cached.surface,
         length: cached.length,
         banking: cached.banking,
@@ -38,15 +39,19 @@ async function enrichTracks(tracks) {
         supabase_id: cached.id
       };
     } else {
-      console.log(`[enrich] Cache miss, researching: ${track.name}`);
+      console.log(`[enrich] Cache miss, geocoding: ${track.name}`);
       const researched = await researchTrack(track.name, track.state);
       trackData = {
         ...track,
         is_known: false,
         ...researched
       };
-      // Save to Supabase for future runs
-      await saveTrack(trackData);
+      // Save to Supabase for future runs (only if we got useful data)
+      if (trackData.lat && trackData.lng) {
+        await saveTrack(trackData);
+      } else {
+        console.log(`[enrich] Skipping save for ${track.name} (no coordinates)`);
+      }
     }
 
     // 2. Fetch weather
@@ -73,65 +78,107 @@ async function lookupTrack(name, state) {
   return data;
 }
 
+/**
+ * Use Nominatim (OpenStreetMap) geocoding to find a track's location.
+ * Free, no API key needed. Returns lat/lng/state for region filtering.
+ */
 async function researchTrack(name, state) {
-  const prompt = `Research the short track racing venue "${name}" in ${state || 'USA'}.
-Return ONLY a JSON object with these fields:
-{
-  "surface": "dirt" | "asphalt" | "concrete" | "mixed",
-  "length": "1/4 mile" (track length as string),
-  "banking": "12 degrees" (banking angle as string, or "flat" if unknown),
-  "shape": "oval" | "figure-8" | "road-course" | "d-shaped",
-  "elevation": number (feet above sea level, estimate if needed),
-  "lat": number (latitude),
-  "lng": number (longitude),
-  "facebook_page_url": "https://facebook.com/..." (official FB page URL, or null),
-  "abbreviation": "XXX" (3-4 letter abbreviation, e.g. PVL for Painesville)
-}`;
-
   try {
-    const escaped = prompt.replace(/'/g, "'\\''");
-    const { stdout } = await execAsync(
-      `openclaw agent --message '${escaped}' --json --thinking medium --timeout 60`,
-      { encoding: 'utf8', timeout: 90000, maxBuffer: 2 * 1024 * 1024 }
-    );
-    const envelope = JSON.parse(stdout);
-    const text = envelope.result || envelope.content || envelope.text || '';
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    // Search with "speedway" or "raceway" context for better results
+    const query = encodeURIComponent(`${name}, USA`);
+    const url = `https://nominatim.openstreetmap.org/search?q=${query}&format=json&limit=1&addressdetails=1`;
+
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'TenthsRacing/1.0 (racenight-bot)' }
+    });
+    const results = await res.json();
+
+    if (results.length > 0) {
+      const r = results[0];
+      const address = r.address || {};
+
+      // Extract state from ISO3166-2 code (format: "US-IN" → "IN")
+      const iso = address['ISO3166-2-lvl4'] || '';
+      const stateCode = iso.startsWith('US-') ? iso.substring(3) : null;
+
+      console.log(`[enrich] Geocoded ${name} → ${stateCode || '?'} (${r.lat}, ${r.lon})`);
+
+      return {
+        state: stateCode || state,
+        location: [address.city || address.town || address.village, stateCode].filter(Boolean).join(', '),
+        surface: null,    // unknown from geocoding
+        length: null,     // unknown from geocoding
+        banking: null,    // unknown from geocoding
+        shape: 'oval',
+        elevation: null,
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lon),
+        facebook_page_url: null,
+        abbreviation: makeAbbreviation(name)
+      };
+    }
+
+    console.log(`[enrich] Geocoding returned no results for ${name}`);
   } catch (err) {
-    console.error(`[enrich] Research failed for ${name}: ${err.message}`);
+    console.error(`[enrich] Geocoding failed for ${name}: ${err.message}`);
   }
 
-  // Fallback: minimal data
+  // Fallback: no location data
   return {
-    surface: 'unknown',
-    length: 'unknown',
-    banking: 'unknown',
+    state: state || null,
+    location: '',
+    surface: null,
+    length: null,
+    banking: null,
     shape: 'oval',
     lat: null,
     lng: null,
     facebook_page_url: null,
-    abbreviation: name.substring(0, 3).toUpperCase()
+    abbreviation: makeAbbreviation(name)
   };
+}
+
+/** Generate a 3-4 letter abbreviation from a track name. */
+function makeAbbreviation(name) {
+  // Take first letter of each word, cap at 4
+  const words = name.replace(/speedway|raceway|motorsports|park|complex/gi, '').trim().split(/\s+/);
+  if (words.length >= 2) {
+    return words.map(w => w[0]).join('').toUpperCase().substring(0, 4);
+  }
+  return name.substring(0, 3).toUpperCase();
 }
 
 async function saveTrack(trackData) {
   const id = trackData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const { error } = await supabase.from('tracks').upsert({
+  const row = {
     id,
     name: trackData.name,
-    location: trackData.location || `${trackData.state}, USA`,
-    surface: trackData.surface,
-    length: trackData.length,
-    banking: trackData.banking,
-    shape: trackData.shape,
-    facebook_page_url: trackData.facebook_page_url,
-    abbreviation: trackData.abbreviation,
-    lat: trackData.lat,
-    lng: trackData.lng
-  }, { onConflict: 'id' });
+    state: trackData.state || null,
+    location: trackData.location || null,
+    shape: trackData.shape || 'oval',
+    facebook_page_url: trackData.facebook_page_url || null,
+    abbreviation: trackData.abbreviation || null,
+    lat: typeof trackData.lat === 'number' ? trackData.lat : null,
+    lng: typeof trackData.lng === 'number' ? trackData.lng : null,
+  };
 
-  if (error) console.error(`[enrich] Save failed for ${trackData.name}: ${error.message}`);
+  // Only include typed fields if they have valid values (avoid sending "unknown" to numeric columns)
+  if (trackData.surface && ['asphalt', 'concrete', 'dirt', 'mixed'].includes(trackData.surface)) {
+    row.surface = trackData.surface;
+  }
+  if (typeof trackData.length === 'number') {
+    row.length = trackData.length;
+  }
+  if (typeof trackData.banking === 'number') {
+    row.banking = trackData.banking;
+  }
+
+  const { error } = await supabase.from('tracks').upsert(row, { onConflict: 'id' });
+  if (error) {
+    console.error(`[enrich] Save failed for ${trackData.name}: ${error.message}`);
+  } else {
+    console.log(`[enrich] Saved ${trackData.name} to DB`);
+  }
 }
 
 async function fetchWeather(lat, lng) {

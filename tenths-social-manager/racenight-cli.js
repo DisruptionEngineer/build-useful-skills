@@ -47,13 +47,39 @@ async function main() {
     return;
   }
 
-  // Step 2: Enrich
-  console.error(`[cli] Found ${result.tracks.length} tracks. Enriching...`);
+  // Step 2: Enrich (adds state, surface, length, etc. from Supabase or AI research)
+  console.error(`[cli] Found ${result.tracks.length} events. Enriching...`);
   const enriched = await enrichTracks(result.tracks);
+
+  // Step 2b: Filter by region AFTER enrichment (location comes from Supabase, not the list page)
+  const regions = stateOverride
+    ? [stateOverride.toUpperCase()]
+    : config.regions;
+  const filtered = enriched.filter((t) => {
+    if (!t.state) {
+      console.error(`[cli] No state for ${t.name}, skipping`);
+      return false;
+    }
+    return regions.includes(t.state.toUpperCase());
+  });
+
+  console.error(
+    `[cli] Region filter: ${enriched.length} → ${filtered.length} tracks (regions: ${regions.join(", ")})`
+  );
+
+  if (filtered.length === 0) {
+    const output = {
+      success: false,
+      error: `No tracks found in target regions (${regions.join(", ")}) tonight.`,
+      tracks: [],
+    };
+    process.stdout.write(JSON.stringify(output));
+    return;
+  }
 
   // Step 3: Tips
   console.error("[cli] Generating tips...");
-  for (const track of enriched) {
+  for (const track of filtered) {
     try {
       track.tip = await generateTip(track);
     } catch (err) {
@@ -66,7 +92,7 @@ async function main() {
   console.error("[cli] Capturing screenshots...");
   let screenshotMap = {};
   try {
-    screenshotMap = await captureRacenightScreenshots(enriched, config);
+    screenshotMap = await captureRacenightScreenshots(filtered, config);
   } catch (err) {
     console.error(`[cli] Screenshots failed: ${err.message}`);
   }
@@ -78,7 +104,7 @@ async function main() {
     String(today.getMonth() + 1).padStart(2, "0") +
     String(today.getDate()).padStart(2, "0");
 
-  for (const track of enriched) {
+  for (const track of filtered) {
     const abbrev = track.abbreviation || track.name.substring(0, 3).toUpperCase();
     track.promo_code = `TENTHS-${abbrev}-${mmdd}`;
     track.promo_url = `https://tenths.racing/promo/${track.promo_code}`;
@@ -99,7 +125,7 @@ async function main() {
     regions: stateOverride ? [stateOverride] : config.regions,
     divisions: config.divisions,
     promo_max_uses: config.promo_max_uses || 10,
-    tracks: enriched.map((t) => ({
+    tracks: filtered.map((t) => ({
       name: t.name,
       state: t.state,
       location: t.location,
