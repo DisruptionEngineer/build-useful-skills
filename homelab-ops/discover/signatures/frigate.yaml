@@ -1,0 +1,19 @@
+name: Frigate
+type: frigate
+service_group: monitoring
+image_patterns:
+  - "ghcr.io/blakeblackshear/frigate"
+  - "blakeblackshear/frigate"
+expected_ports: [5000, 8971, 1984]
+api:
+  health_endpoint: "/api/version"
+  auth_header: null
+  version_field: "version"
+config:
+  path: "/config/config.yml"
+  key_extraction: "none"
+  format: yaml
+  notes: "Frigate has no API key. Access control via network only."
+dependency_hints:
+  depends_on: ["mqtt"]
+  feeds_into: []

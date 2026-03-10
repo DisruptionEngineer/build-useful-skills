@@ -1,0 +1,19 @@
+name: Bazarr
+type: bazarr
+service_group: arr_stack
+image_patterns:
+  - "linuxserver/bazarr"
+  - "hotio/bazarr"
+  - "bazarr/bazarr"
+expected_ports: [6767]
+api:
+  health_endpoint: "/api/system/status"
+  auth_header: "X-API-KEY"
+  version_field: "data.bazarr_version"
+config:
+  path: "/config/config/config.yaml"
+  key_extraction: "yaml:auth.apikey"
+  format: yaml
+dependency_hints:
+  depends_on: ["sonarr", "radarr"]
+  feeds_into: []

@@ -1,0 +1,19 @@
+name: SABnzbd
+type: sabnzbd
+service_group: download
+image_patterns:
+  - "linuxserver/sabnzbd"
+  - "hotio/sabnzbd"
+  - "sabnzbd/sabnzbd"
+expected_ports: [8080]
+api:
+  health_endpoint: "/api?mode=version&output=json"
+  auth_param: "apikey"
+  version_field: "version"
+config:
+  path: "/config/sabnzbd.ini"
+  key_extraction: "ini:misc.api_key"
+  format: ini
+dependency_hints:
+  depends_on: []
+  feeds_into: ["sonarr", "radarr", "lidarr", "readarr"]
