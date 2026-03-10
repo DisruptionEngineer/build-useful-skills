@@ -1,0 +1,23 @@
+name: "Generic *arr App"
+type: generic-arr
+service_group: arr_stack
+image_patterns:
+  - "linuxserver/*arr"
+  - "hotio/*arr"
+  - "*arr/*arr"
+expected_ports: []
+api:
+  health_endpoint: "/api/v3/system/status"
+  auth_header: "X-Api-Key"
+  version_field: "version"
+  fallback_endpoints:
+    - "/api/v1/system/status"
+    - "/api/system/status"
+config:
+  path: "/config/config.xml"
+  key_extraction: "xpath://ApiKey"
+  format: xml
+dependency_hints:
+  depends_on: []
+  feeds_into: []
+notes: "Fallback pattern for unrecognized *arr-family apps. Try multiple API versions."

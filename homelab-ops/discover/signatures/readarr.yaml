@@ -1,0 +1,19 @@
+name: Readarr
+type: readarr
+service_group: arr_stack
+image_patterns:
+  - "linuxserver/readarr"
+  - "hotio/readarr"
+  - "readarr/readarr"
+expected_ports: [8787]
+api:
+  health_endpoint: "/api/v1/system/status"
+  auth_header: "X-Api-Key"
+  version_field: "version"
+config:
+  path: "/config/config.xml"
+  key_extraction: "xpath://ApiKey"
+  format: xml
+dependency_hints:
+  depends_on: ["prowlarr", "sabnzbd"]
+  feeds_into: []

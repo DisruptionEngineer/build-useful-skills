@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Homelab Service Registry",
+  "description": "Service discovery output consumed by all homelab agents",
+  "type": "object",
+  "required": ["discovered_at", "host", "containers", "feeds_into", "service_groups", "unhandled"],
+  "properties": {
+    "discovered_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of last discovery run"
+    },
+    "host": {
+      "type": "string",
+      "description": "IP address of the Unraid server"
+    },
+    "containers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["image", "status", "ports", "integration_status"],
+        "properties": {
+          "image": { "type": "string" },
+          "status": { "type": "string", "enum": ["running", "stopped", "restarting", "paused", "exited", "dead"] },
+          "health": { "type": "string", "enum": ["healthy", "unhealthy", "starting", "none"] },
+          "ports": { "type": "object", "additionalProperties": { "type": "string" } },
+          "api": {
+            "type": "object",
+            "properties": {
+              "base_url": { "type": "string" },
+              "api_key": { "type": "string", "description": "Always 'stored-in-env' — actual key in .env" },
+              "version": { "type": "string" },
+              "type": { "type": "string" }
+            }
+          },
+          "depends_on": { "type": "array", "items": { "type": "string" } },
+          "depended_by": { "type": "array", "items": { "type": "string" } },
+          "integration_status": {
+            "type": "string",
+            "enum": ["managed", "recognized", "unknown"],
+            "description": "managed=signature+playbooks, recognized=signature only, unknown=no match"
+          }
+        }
+      }
+    },
+    "feeds_into": {
+      "type": "object",
+      "description": "Directed graph: key service feeds data into value services",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "service_groups": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "unhandled": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["container", "type", "reason"],
+        "properties": {
+          "container": { "type": "string" },
+          "type": { "type": "string", "enum": ["recognized", "unknown"] },
+          "reason": { "type": "string" },
+          "suggestion": { "type": "string" },
+          "image": { "type": "string" },
+          "ports": { "type": "object" }
+        }
+      }
+    }
+  }
+}

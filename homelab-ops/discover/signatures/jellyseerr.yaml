@@ -1,0 +1,17 @@
+name: Jellyseerr
+type: jellyseerr
+service_group: media
+image_patterns:
+  - "fallenbagel/jellyseerr"
+expected_ports: [5055]
+api:
+  health_endpoint: "/api/v1/status"
+  auth_header: "X-Api-Key"
+  version_field: "version"
+config:
+  path: "/app/config/settings.json"
+  key_extraction: "json:main.apiKey"
+  format: json
+dependency_hints:
+  depends_on: ["sonarr", "radarr", "emby"]
+  feeds_into: []

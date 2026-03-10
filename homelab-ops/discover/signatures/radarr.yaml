@@ -1,0 +1,19 @@
+name: Radarr
+type: radarr
+service_group: arr_stack
+image_patterns:
+  - "linuxserver/radarr"
+  - "hotio/radarr"
+  - "radarr/radarr"
+expected_ports: [7878]
+api:
+  health_endpoint: "/api/v3/system/status"
+  auth_header: "X-Api-Key"
+  version_field: "version"
+config:
+  path: "/config/config.xml"
+  key_extraction: "xpath://ApiKey"
+  format: xml
+dependency_hints:
+  depends_on: ["prowlarr", "sabnzbd"]
+  feeds_into: ["emby", "jellyfin", "plex"]

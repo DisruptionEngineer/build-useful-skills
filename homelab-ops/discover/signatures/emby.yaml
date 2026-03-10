@@ -1,0 +1,20 @@
+name: Emby
+type: emby
+service_group: media
+image_patterns:
+  - "linuxserver/emby"
+  - "emby/embyserver"
+  - "emby/emby"
+expected_ports: [8096, 8099, 8920]
+api:
+  health_endpoint: "/System/Info/Public"
+  auth_header: "X-Emby-Token"
+  version_field: "Version"
+config:
+  path: "/config/data/system.xml"
+  key_extraction: "manual"
+  format: xml
+  notes: "Emby API key must be generated in the dashboard. Cannot auto-extract."
+dependency_hints:
+  depends_on: ["sonarr", "radarr"]
+  feeds_into: []
