@@ -1,0 +1,156 @@
+# Facebook Credential Flow
+# Selectors marked with "# VERIFY:" may need updating if Facebook changes their UI.
+# Test by running: node credential-manager.js setup facebook
+name: facebook
+display_name: "Facebook Graph API"
+description: "Set up Meta Developer App and generate long-lived page token"
+
+credentials_required:
+  - FB_APP_ID
+  - FB_APP_SECRET
+  - FB_PAGE_ACCESS_TOKEN
+  - FB_PAGE_ID
+
+refresh:
+  strategy: token_exchange
+  refresh_before_days: 7
+
+steps:
+  - id: check_existing
+    type: check_credentials
+    keys: [FB_APP_ID, FB_APP_SECRET, FB_PAGE_ACCESS_TOKEN]
+    on_all_present: skip_to:validate_token
+
+  - id: login_facebook
+    type: browser
+    action: navigate
+    url: "https://developers.facebook.com"
+    wait_for: networkidle
+    detect_login: "selector:#login_form"  # VERIFY: Facebook login form selector
+    on_login_required:
+      - action: fill
+        selector: "#email"  # VERIFY: email input on FB login
+        value: "{{env.FB_LOGIN_EMAIL}}"
+      - action: fill
+        selector: "#pass"  # VERIFY: password input on FB login
+        value: "{{env.FB_LOGIN_PASSWORD}}"
+      - action: click
+        selector: "#loginbutton"  # VERIFY: login button
+      - action: wait_for
+        selector: "[data-testid='royal_user_name']"  # VERIFY: post-login indicator
+        timeout: 30000
+        on_timeout: human_fallback
+
+  - id: navigate_apps
+    type: browser
+    action: navigate
+    url: "https://developers.facebook.com/apps/"
+    wait_for: networkidle
+
+  - id: find_or_create_app
+    type: browser
+    action: conditional
+    check: "selector:[data-testid='app-card']:has-text('Tenths Social')"  # VERIFY: app card selector
+    on_found: "click_and_skip_to:navigate_settings"
+    on_not_found: continue
+
+  - id: create_app
+    type: browser_sequence
+    steps:
+      - action: click
+        selector: "[data-testid='create-app-button'], button:has-text('Create App')"  # VERIFY
+      - action: wait_for
+        selector: "[data-testid='app-creation-dialog'], [role='dialog']"  # VERIFY
+      - action: fill
+        selector: "input[name='app_name'], input[placeholder*='App Name']"  # VERIFY
+        value: "Tenths Social"
+      - action: click
+        selector: "button:has-text('Create App'), button[type='submit']"  # VERIFY
+      - action: wait_for
+        selector: "[data-testid='app-dashboard']"  # VERIFY: app dashboard after creation
+        timeout: 15000
+    on_failure: human_fallback
+
+  - id: navigate_settings
+    type: browser
+    action: navigate
+    url: "https://developers.facebook.com/apps/{{state.app_id}}/settings/basic/"
+    wait_for: networkidle
+    on_failure: human_fallback
+
+  - id: extract_app_credentials
+    type: browser_sequence
+    steps:
+      - action: extract
+        selector: "input[name='app_id'], span:has-text('App ID') + span"  # VERIFY
+        store_as: FB_APP_ID
+      - action: click
+        selector: "button:has-text('Show')"  # VERIFY: show app secret button
+      - action: extract
+        selector: "input[name='app_secret'], input[type='text'][readonly]"  # VERIFY
+        store_as: FB_APP_SECRET
+    on_failure: human_fallback
+
+  - id: navigate_explorer
+    type: browser
+    action: navigate
+    url: "https://developers.facebook.com/tools/explorer/"
+    wait_for: networkidle
+
+  - id: generate_short_token
+    type: browser_sequence
+    steps:
+      # Select the app from dropdown
+      - action: click
+        selector: "[data-testid='app-selector'], select[name='app']"  # VERIFY
+      - action: click
+        selector: "option:has-text('Tenths Social')"  # VERIFY
+      # Click Generate Token
+      - action: click
+        selector: "button:has-text('Generate Access Token')"  # VERIFY
+      # Wait for OAuth dialog and authorize
+      - action: wait_for
+        selector: "button:has-text('Continue'), button:has-text('Allow')"  # VERIFY
+        timeout: 10000
+      - action: click
+        selector: "button:has-text('Continue'), button:has-text('Allow')"  # VERIFY
+      # Extract the generated token
+      - action: wait_for
+        selector: "input[name='access_token'], textarea[data-testid='access-token']"  # VERIFY
+        timeout: 10000
+      - action: extract
+        selector: "input[name='access_token'], textarea[data-testid='access-token']"  # VERIFY
+        store_as: _short_lived_token
+    on_failure: human_fallback
+
+  - id: exchange_token
+    type: http
+    method: GET
+    url: "https://graph.facebook.com/v19.0/oauth/access_token"
+    params:
+      grant_type: fb_exchange_token
+      client_id: "{{creds.FB_APP_ID}}"
+      client_secret: "{{creds.FB_APP_SECRET}}"
+      fb_exchange_token: "{{state._short_lived_token}}"
+    extract:
+      access_token: FB_PAGE_ACCESS_TOKEN
+      expires_in: _token_expires_in
+
+  - id: validate_token
+    type: http
+    method: GET
+    url: "https://graph.facebook.com/v19.0/me"
+    params:
+      access_token: "{{creds.FB_PAGE_ACCESS_TOKEN}}"
+    expect:
+      status: 200
+    on_failure: restart_from:login_facebook
+
+  - id: store_credentials
+    type: store
+    keys: [FB_APP_ID, FB_APP_SECRET, FB_PAGE_ACCESS_TOKEN, FB_PAGE_ID]
+
+  - id: notify_success
+    type: notify
+    channel: discord
+    message: "Facebook credentials configured. Token expires in {{state._token_expires_in}} seconds. Auto-refresh enabled."
