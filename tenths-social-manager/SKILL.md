@@ -16,6 +16,28 @@ Generate, review, and publish social media content for tenths.racing on X/Twitte
 - Looking up or adding tracks, cars, or tires in Supabase
 - Creating promo/trial links for Tenths Pro subscriptions
 - Troubleshooting failed X API posts
+- Setting up or refreshing API credentials (Facebook, X/Twitter)
+
+## Credential Management
+
+The credential-manager CLI handles API credential setup, validation, and refresh automatically. **Never explain credential setup steps to the user — run the tools instead.**
+
+### Commands
+
+```bash
+node credential-manager.js status           # Check credential health (run before publishing)
+node credential-manager.js setup facebook   # Set up credentials for a service
+node credential-manager.js refresh facebook # Force-refresh an expiring token
+node credential-manager.js resume facebook  # Resume a paused setup flow
+node credential-manager.js list             # List available credential flows
+```
+
+### Workflow
+
+1. **Before publishing:** Always run `node credential-manager.js status` first. If any credential shows expired or missing, run `setup` or `refresh` before proceeding.
+2. **When asked to set up API access:** Run `node credential-manager.js setup <service>` — do NOT provide step-by-step instructions for the human.
+3. **If setup pauses (exit code 2):** The flow hit a step that needs human intervention (CAPTCHA, 2FA). Notify on Discord and tell the user to complete it in the browser, then run `resume`.
+4. **Token refresh is automatic:** The publisher pre-checks credentials and will error with instructions if tokens are expired.
 
 ## Prerequisites
 
@@ -41,6 +63,8 @@ export FB_APP_SECRET="your-app-secret"
 # Demo user for screenshots (Clerk auth)
 export DEMO_USER_EMAIL="demo@tenths.racing"
 export DEMO_USER_PASSWORD="your-demo-password"
+# Facebook Group scouting (optional — for !tenths scout)
+export FB_GROUP_IDS="group-id-1,group-id-2"
 ```
 
 ## Data Files
@@ -115,6 +139,8 @@ Engagement metrics per post and aggregated theme performance. Updated daily by c
 | `!tenths addtire <brand> <model>` | Research and add a tire to Supabase |
 | `!tenths promo [days] [max_uses] [description]` | Create a promo link (default: 30-day trial) |
 | `!tenths racenight [state]` | Discover tonight's races, generate personalized FB posts + promos |
+| `!tenths tip [topic]` | Generate a racing tip with screenshot, publish to X + schedule to FB Business Suite. Topics: gear-ratio, corner-weight, tire-pressure, rim-offset, transmission, engine |
+| `!tenths scout [keywords]` | Search Facebook groups for setup help threads. Shows top matches with links. |
 
 ## Command Handler
 
@@ -132,8 +158,10 @@ const QUEUE_PATH = path.join(process.env.HOME, '.agents', 'data', 'tenths-social
 const AUTH_PATH = path.join(process.env.HOME, '.agents', 'config', 'authorized-users.json');
 const REPO_PATH = path.join(process.env.HOME, 'Code', 'crew-chief');
 const { getTopThemes } = require('./insights');
-const { captureScreenshots } = require('./screenshots');
+const { captureScreenshots, captureTipScreenshot } = require('./screenshots');
 const { handleRacenight } = require('./racenight');
+const { generateStandaloneTip, TIP_TOPICS } = require('./tip-generator');
+const { scheduleToFacebook, searchGroupPosts } = require('./publisher-fb');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -168,22 +196,250 @@ client.on('messageCreate', async (message) => {
     case 'addtire':   await handleAddEntity(message, 'tire', args.slice(1)); break;
     case 'promo':     await handlePromo(message, args.slice(1)); break;
     case 'racenight': await handleRacenightCommand(message, args.slice(1)); break;
-    default:          await message.reply('Commands: `generate`, `quick`, `queue`, `schedule`, `history`, `post`, `themes`, `stats`, `lookup`, `addtrack`, `addcar`, `addtire`, `promo`, `racenight`');
+    case 'tip':       await handleTipCommand(message, args.slice(1)); break;
+    case 'scout':     await handleScoutCommand(message, args.slice(1)); break;
+    default:          await message.reply('Commands: `generate`, `quick`, `queue`, `schedule`, `history`, `post`, `themes`, `stats`, `lookup`, `addtrack`, `addcar`, `addtire`, `promo`, `racenight`, `tip`, `scout`');
   }
 });
 
 async function handleRacenightCommand(message, args) {
   const stateOverride = args[0] || null; // e.g., "TX"
-  await message.react('⏳');
+  await message.add_reaction('⏳');
   try {
     await handleRacenight(message, stateOverride);
-    await message.reactions.cache.get('⏳')?.remove();
-    await message.react('🏁');
+    await message.remove_reaction('⏳', client.user);
+    await message.add_reaction('🏁');
   } catch (err) {
-    await message.reactions.cache.get('⏳')?.remove();
-    await message.react('❌');
+    await message.remove_reaction('⏳', client.user);
+    await message.add_reaction('❌');
     await message.reply(`Race night failed:\n\`\`\`\n${err.message.slice(0, 500)}\n\`\`\``);
   }
+}
+
+async function handleTipCommand(message, args) {
+  const topicIds = Object.keys(TIP_TOPICS);
+  let topicId = args[0]?.toLowerCase();
+
+  // Validate or pick random topic
+  if (!topicId || !TIP_TOPICS[topicId]) {
+    topicId = topicIds[Math.floor(Math.random() * topicIds.length)];
+    if (args[0]) await message.reply(`Unknown topic "${args[0]}". Using random: **${topicId}**\nAvailable: ${topicIds.join(', ')}`);
+  }
+  const topic = TIP_TOPICS[topicId];
+
+  await message.add_reaction('⏳');
+  try {
+    // Step 1: Generate tip + post text
+    const content = await generateStandaloneTip(topicId);
+
+    // Step 2: Capture screenshot with injected demo values
+    const screenshotPath = await captureTipScreenshot(topicId, topic);
+
+    // Step 3: Build Discord preview embed
+    const xPreview = content.x_text.length > 1024
+      ? content.x_text.substring(0, 1021) + '...'
+      : content.x_text;
+    const fbPreview = content.fb_text.length > 1024
+      ? content.fb_text.substring(0, 1021) + '...'
+      : content.fb_text;
+    const hashtags = (content.fb_hashtags || []).join(' ');
+
+    const embed = new EmbedBuilder()
+      .setTitle(`💡 RACING TIP: ${topic.label}`)
+      .setColor(0xFF8A00)
+      .addFields(
+        { name: 'Tip', value: content.tip, inline: false },
+        { name: `𝕏 Post (${content.x_text.length}/280 chars)`, value: `\`\`\`\n${xPreview}\n\`\`\``, inline: false },
+        { name: '📘 Facebook Post', value: `\`\`\`\n${fbPreview}\n\`\`\``, inline: false },
+        { name: 'Hashtags', value: hashtags || 'none', inline: true },
+        { name: 'Screenshot', value: screenshotPath ? `${topic.label} ✅` : '❌ Failed', inline: true }
+      )
+      .setFooter({ text: `Topic: ${topicId} · React: ✅ post to X + schedule FB · ❌ discard` })
+      .setTimestamp();
+
+    const sent = await message.channel.send({ embeds: [embed] });
+    await sent.add_reaction('✅');
+    await sent.add_reaction('❌');
+
+    // Step 4: Set up reaction collector for publish/discard
+    const post = {
+      id: `TIP-${Date.now()}`,
+      status: 'tip-draft',
+      theme: 'racing_tip',
+      content: {
+        x: { text: content.x_text, char_count: content.x_text.length },
+        fb: { text: content.fb_text, char_count: content.fb_text.length, hashtags: content.fb_hashtags || [] }
+      },
+      created_at: new Date().toISOString(),
+      discord_message_id: sent.id,
+      platform_post_ids: {},
+      _screenshotPath: screenshotPath,
+      _topicId: topicId
+    };
+
+    const queue = loadQueue();
+    queue.posts.push(post);
+    saveQueue(queue);
+
+    const collector = sent.createReactionCollector({
+      filter: (reaction, user) => !user.bot && ['✅', '❌'].includes(reaction.emoji.name),
+      time: 30 * 60 * 1000,
+      max: 1
+    });
+
+    collector.on('collect', async (reaction) => {
+      const ch = reaction.message.channel;
+      // Reload queue from disk to avoid overwriting changes made during the 30-min window
+      const freshQueue = loadQueue();
+      const livePost = freshQueue.posts.find(p => p.id === post.id);
+      if (!livePost) { await ch.send('❌ Tip post not found in queue.'); return; }
+
+      if (reaction.emoji.name === '✅') {
+        try {
+          const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+          const results = {};
+          const errors = [];
+
+          // X: post immediately with image
+          if (config.platforms.x?.enabled) {
+            try { results.x = await postToX(livePost, screenshotPath); }
+            catch (err) { results.x = { error: err.message }; errors.push(`X: ${err.message}`); }
+          }
+
+          // FB: schedule for 30 min from now (shows in Business Suite)
+          if (config.platforms.fb?.enabled && livePost.content.fb) {
+            try {
+              const fbResult = await scheduleToFacebook(livePost, 30, screenshotPath);
+              results.fb = fbResult.id;
+              results.fb_scheduled_time = fbResult.scheduled_time;
+            } catch (err) { results.fb = { error: err.message }; errors.push(`FB: ${err.message}`); }
+          }
+
+          const platformKeys = Object.keys(results).filter(k => k !== 'fb_scheduled_time');
+          const allFailed = errors.length > 0 && platformKeys.every(k => results[k] && results[k].error);
+          livePost.platform_post_ids = results;
+          livePost.status = allFailed ? 'failed' : 'posted';
+          livePost.posted_at = allFailed ? undefined : new Date().toISOString();
+          if (allFailed) livePost.failed_at = new Date().toISOString();
+          saveQueue(freshQueue);
+
+          const links = [];
+          if (results.x && !results.x.error) links.push(`𝕏: https://x.com/TenthsRacing/status/${results.x}`);
+          if (results.fb && !results.fb.error) {
+            const schedTime = results.fb_scheduled_time
+              ? new Date(results.fb_scheduled_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })
+              : '~30 min';
+            links.push(`📘 FB: scheduled for ${schedTime} ET — check Business Suite`);
+          }
+
+          const resultEmbed = new EmbedBuilder().setTimestamp();
+          if (allFailed) {
+            resultEmbed.setTitle(`❌ Tip Post Failed`).setColor(0xe74c3c)
+              .setDescription(errors.join('\n'));
+          } else {
+            resultEmbed.setTitle(`🏁 Tip Published: ${topic.label}`).setColor(0x2ecc71)
+              .setDescription(links.join('\n') + (errors.length ? `\n⚠️ Partial: ${errors.join(', ')}` : ''));
+          }
+          await ch.send({ embeds: [resultEmbed] });
+        } catch (err) {
+          livePost.status = 'failed'; saveQueue(freshQueue);
+          await ch.send(`❌ Tip publish failed: \`${err.message.slice(0, 300)}\``);
+        }
+      } else {
+        livePost.status = 'rejected'; saveQueue(freshQueue);
+        await ch.send(`❌ Tip discarded.`);
+      }
+    });
+
+    await message.remove_reaction('⏳', client.user);
+    await message.add_reaction('🏁');
+  } catch (err) {
+    await message.remove_reaction('⏳', client.user);
+    await message.add_reaction('❌');
+    await message.reply(`Tip generation failed:\n\`\`\`\n${err.message.slice(0, 500)}\n\`\`\``);
+  }
+}
+
+async function handleScoutCommand(message, args) {
+  const groupIds = (process.env.FB_GROUP_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!groupIds.length) {
+    return message.reply('No Facebook groups configured. Set `FB_GROUP_IDS` env var (comma-separated group IDs).');
+  }
+
+  await message.add_reaction('🔍');
+  const extraKeywords = args.map(a => a.toLowerCase());
+
+  try {
+    let allResults = [];
+    for (const groupId of groupIds) {
+      try {
+        const posts = await searchGroupPosts(groupId, extraKeywords, 100);
+        allResults.push(...posts.map(p => ({ ...p, groupId })));
+      } catch (err) {
+        console.error(`[scout] Group ${groupId} failed: ${err.message}`);
+      }
+    }
+
+    // Sort all results by score, take top 10
+    allResults.sort((a, b) => b.score - a.score);
+    const top = allResults.slice(0, 10);
+
+    if (!top.length) {
+      await message.remove_reaction('🔍', client.user);
+      return message.reply('No setup-related threads found in the last 100 posts. Try again on a busier day or add keywords: `!tenths scout spring rate loose`');
+    }
+
+    // Build Discord embeds (max 10 results, split into pages of 5)
+    const pages = [];
+    for (let i = 0; i < top.length; i += 5) {
+      const chunk = top.slice(i, i + 5);
+      const embed = new EmbedBuilder()
+        .setTitle(`🔍 Setup Help Threads (${i + 1}-${i + chunk.length} of ${top.length})`)
+        .setColor(0xFF8A00)
+        .setTimestamp();
+
+      for (const post of chunk) {
+        const preview = post.message.length > 200
+          ? post.message.substring(0, 197) + '...'
+          : post.message;
+        const age = getRelativeTime(post.created_time);
+        const keywords = post.matched_keywords.slice(0, 5).join(', ');
+        embed.addFields({
+          name: `${post.from} · ${age} · Score: ${post.score}`,
+          value: `${preview}\n🔗 [Open thread](${post.permalink}) · Keywords: ${keywords}`,
+          inline: false
+        });
+      }
+
+      if (extraKeywords.length) {
+        embed.setFooter({ text: `Extra keywords: ${extraKeywords.join(', ')} · ${groupIds.length} group(s) searched` });
+      } else {
+        embed.setFooter({ text: `${groupIds.length} group(s) searched · Add keywords: !tenths scout loose spring` });
+      }
+      pages.push(embed);
+    }
+
+    for (const embed of pages) {
+      await message.channel.send({ embeds: [embed] });
+    }
+
+    await message.remove_reaction('🔍', client.user);
+    await message.add_reaction('🏁');
+  } catch (err) {
+    await message.remove_reaction('🔍', client.user);
+    await message.add_reaction('❌');
+    await message.reply(`Scout failed:\n\`\`\`\n${err.message.slice(0, 500)}\n\`\`\``);
+  }
+}
+
+function getRelativeTime(isoString) {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
 }
 
 function isAuthorized(discordId) {
@@ -211,7 +467,7 @@ Builds context from config, git changelog, racing season, and app features. Call
 
 ```javascript
 async function handleGenerate(message, theme) {
-  await message.react('⏳');
+  await message.add_reaction('⏳');
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const context = buildContentContext(config, theme);
   try {
@@ -227,12 +483,12 @@ async function handleGenerate(message, theme) {
         status: 'draft', theme: draft.theme, content: draft.content,
         scheduled_at: null, posted_at: null, discord_message_id: null, platform_post_ids: {} };
       const sent = await message.channel.send({ embeds: [buildDraftEmbed(post)] });
-      await sent.react('✅'); await sent.react('✏️'); await sent.react('❌');
+      await sent.add_reaction('✅'); await sent.add_reaction('✏️'); await sent.add_reaction('❌');
       post.discord_message_id = sent.id; queue.posts.push(post);
     }
-    saveQueue(queue); await message.reactions.cache.get('⏳')?.remove(); await message.react('🏁');
+    saveQueue(queue); await message.remove_reaction('⏳', client.user); await message.add_reaction('🏁');
   } catch (err) {
-    await message.reactions.cache.get('⏳')?.remove(); await message.react('❌');
+    await message.remove_reaction('⏳', client.user); await message.add_reaction('❌');
     await message.reply(`Generation failed:\n\`\`\`\n${err.message.slice(0, 500)}\n\`\`\``);
   }
 }
@@ -314,7 +570,7 @@ async function handleQuickPost(message, text) {
     )
     .setTimestamp().setFooter({ text: `${post.id} · ✅ post now · ❌ discard` });
   const sent = await message.channel.send({ embeds: [embed] });
-  await sent.react('✅'); await sent.react('❌');
+  await sent.add_reaction('✅'); await sent.add_reaction('❌');
   post.discord_message_id = sent.id; queue.posts.push(post); saveQueue(queue);
 }
 
@@ -409,23 +665,31 @@ const xClient = new TwitterApi({
   appKey: process.env.X_API_KEY, appSecret: process.env.X_API_SECRET,
   accessToken: process.env.X_ACCESS_TOKEN, accessSecret: process.env.X_ACCESS_SECRET });
 
-async function postToX(post) {
+async function postToX(post, imagePath) {
+  if (imagePath) {
+    const mediaId = await xClient.v1.uploadMedia(imagePath);
+    const { data } = await xClient.v2.tweet({
+      text: post.content.x.text,
+      media: { media_ids: [mediaId] }
+    });
+    return data.id;
+  }
   const { data } = await xClient.v2.tweet(post.content.x.text);
   return data.id;
 }
 
-async function publishToAllPlatforms(post) {
+async function publishToAllPlatforms(post, imagePath) {
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const results = {};
   const errors = [];
 
   if (config.platforms.x && config.platforms.x.enabled) {
-    try { results.x = await postToX(post); }
+    try { results.x = await postToX(post, imagePath || null); }
     catch (err) { results.x = { error: err.message }; errors.push(`X: ${err.message}`); }
   }
 
   if (config.platforms.fb && config.platforms.fb.enabled && post.content.fb) {
-    try { results.fb = await postToFacebook(post); }
+    try { results.fb = await postToFacebook(post, imagePath || null); }
     catch (err) { results.fb = { error: err.message }; errors.push(`FB: ${err.message}`); }
   }
 
@@ -611,7 +875,7 @@ async function handleLookup(message, type, query) {
   if (!type || !query) return message.reply('Usage: `!tenths lookup <track|car|tire> <query>`');
   const cfg = LOOKUP[type.toLowerCase()];
   if (!cfg) return message.reply('Type must be `track`, `car`, or `tire`.');
-  await message.react('🔍');
+  await message.add_reaction('🔍');
   try {
     const { data, error } = await supabase.from(cfg.table).select('*')
       .or(cfg.cols.map(c => `${c}.ilike.%${query}%`).join(',')).eq('active', true).order(cfg.order).limit(10);
@@ -674,7 +938,7 @@ async function handleAddEntity(message, type, args) {
   if (args.length < cfg.minArgs) return message.reply(`Usage: ${cfg.usage}`);
   let parsed;
   try { parsed = cfg.parseArgs(args); } catch (e) { return message.reply(e.message); }
-  await message.react('⏳');
+  await message.add_reaction('⏳');
   const { data: existing } = await cfg.checkDupe(parsed);
   if (existing?.length) return message.reply(cfg.dupeMsg(existing[0]));
   try {
@@ -683,7 +947,7 @@ async function handleAddEntity(message, type, args) {
       .addFields(...cfg.buildEmbed(entityData))
       .setFooter({ text: 'React: ✅ add · ❌ discard' }).setTimestamp();
     const sent = await message.channel.send({ embeds: [embed] });
-    await sent.react('✅'); await sent.react('❌');
+    await sent.add_reaction('✅'); await sent.add_reaction('❌');
     pendingInserts.set(sent.id, { type, data: entityData });
   } catch (err) { await message.reply(`Research failed: \`${err.message.slice(0, 300)}\``); }
 }
@@ -769,6 +1033,10 @@ Facebook: developers.facebook.com -> Create App -> Add Facebook Login + Pages AP
 # Playwright not found -> npm install playwright && npx playwright install chromium
 # Screenshots stale -> captureScreenshots() runs before each generate. Check logs for errors.
 # FB insights empty -> Page needs >= 100 followers for some metrics. Basic metrics work immediately.
+# FB schedule "Invalid parameter" -> scheduled_publish_time must be 10+ min in the future and < 6 months.
+# FB schedule not visible in Business Suite -> ensure unpublished_content_type=SCHEDULED is set (publisher-fb.js handles this).
+# Scout "FB Group API" error -> group access requires User Access Token with groups_access_member_info permission. Page tokens don't work for groups.
+# Scout returns empty -> group may be private (need membership) or group ID may be wrong. Verify at facebook.com/groups/{id}.
 ```
 
 ## Tips
@@ -776,6 +1044,7 @@ Facebook: developers.facebook.com -> Create App -> Add Facebook Login + Pages AP
 - Dry-preview `!tenths generate` before first real batch to verify brand voice.
 - X free tier: 1,500 tweets/month (~20/month at 3-5 posts/week).
 - Use `!tenths generate racing_tip` Fridays before race night; `!tenths quick` for race-night reactions.
+- `!tenths tip` posts to X immediately and schedules FB 30 min out (visible in Business Suite → Planner). Great for mid-week engagement. Use `!tenths tip gear-ratio` to target a specific topic.
 - AI entity research is best-effort. Always verify specs against official sources before approving.
 - Seed tires table via `!tenths addtire` for each compound in `tires.ts`. Use `!tenths lookup` first to avoid dupes.
 - `!tenths promo` defaults to 30 days free, unlimited uses. Add args for custom trials: `!tenths promo 14 50 Race day special`.
@@ -783,4 +1052,6 @@ Facebook: developers.facebook.com -> Create App -> Add Facebook Login + Pages AP
 - FB insights drive content themes after ~2 weeks of data. Initial posts use even theme distribution.
 - Page Access Tokens expire ~60 days. Set a calendar reminder or use refreshPageToken() in publisher-fb.js.
 - Dependencies: playwright, formdata-node. Install with: npm install playwright formdata-node && npx playwright install chromium
+- `!tenths scout` searches FB groups for setup help threads — great for finding engagement opportunities. Add keywords: `!tenths scout loose dirt oval`.
+- Scout needs FB_GROUP_IDS env var. Find group IDs: open a group → URL is facebook.com/groups/{ID}. For private groups, the Page/User must be a member.
 - Multi-platform expansion: X and Facebook are live. Add more platforms by extending publishToAllPlatforms() and the content generation prompt.
